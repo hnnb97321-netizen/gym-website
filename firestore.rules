@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isOwnerEmail() {
+      return signedIn() && request.auth.token.email != null
+        && request.auth.token.email.lower() == 'hnnb97321@gmail.com';
+    }
+    function profileExists() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    function role() {
+      return profileExists()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : (isOwnerEmail() ? 'owner' : 'member');
+    }
+    function isOwner() { return signedIn() && (role() == 'owner' || isOwnerEmail()); }
+    function isStaff() { return signedIn() && (role() == 'owner' || role() == 'coach' || isOwnerEmail()); }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isOwner() || (role() == 'coach' && resource.data.role == 'member'));
+      allow create: if signedIn() && request.auth.uid == uid
+        && ((request.resource.data.role == 'owner' && isOwnerEmail())
+          || (request.resource.data.role == 'member' && !isOwnerEmail()));
+      allow update: if isOwner()
+        || (signedIn() && request.auth.uid == uid
+          && resource.data.role == 'member'
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','photoURL','updatedAt']));
+      allow delete: if isOwner();
+    }
+
+    match /plans/{planId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isOwner();
+    }
+
+    match /payments/{paymentId} {
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasOnly(['uid','name','email','planId','planName','amount','durationDays','utr','status','createdAt'])
+        && request.resource.data.utr is string
+        && request.resource.data.utr.size() >= 6
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && exists(/databases/$(database)/documents/plans/$(request.resource.data.planId))
+        && get(/databases/$(database)/documents/plans/$(request.resource.data.planId)).data.active == true
+        && request.resource.data.amount == get(/databases/$(database)/documents/plans/$(request.resource.data.planId)).data.price;
+      allow read: if signedIn() && (resource.data.uid == request.auth.uid || isOwner());
+      allow update: if isOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','reviewNote','reviewedBy','reviewedAt'])
+        && request.resource.data.reviewedBy == request.auth.uid
+        && request.resource.data.status in ['approved','rejected'];
+      allow delete: if isOwner();
+    }
+
+    match /attendance/{attendanceId} {
+      allow create: if isStaff()
+        && request.resource.data.recordedBy == request.auth.uid
+        && request.resource.data.uid is string
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.uid))
+        && get(/databases/$(database)/documents/users/$(request.resource.data.uid)).data.role == 'member';
+      allow read: if signedIn() && (resource.data.uid == request.auth.uid || isStaff());
+      allow update, delete: if isOwner();
+    }
+  }
+}
