@@ -4,7 +4,7 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function isOwnerEmail() {
       return signedIn() && request.auth.token.email != null
-        && request.auth.token.email.lower() == 'hnnb97321@gmail.com';
+        && request.auth.token.email == 'hnnb97321@gmail.com';
     }
     function profileExists() {
       return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
@@ -20,6 +20,9 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isOwner() || (role() == 'coach' && resource.data.role == 'member'));
       allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['uid','name','email','photoURL','role','membershipStatus','createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.membershipStatus == 'inactive'
         && ((request.resource.data.role == 'owner' && isOwnerEmail())
           || (request.resource.data.role == 'member' && !isOwnerEmail()));
       allow update: if isOwner()
